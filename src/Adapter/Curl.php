@@ -14,25 +14,35 @@ class Curl implements Adapter
 {
     use LoggerAwareTrait;
 
-    public function __construct() {
+    /**
+     * @var null
+     */
+    private $apiKey;
+
+    public function __construct($apiKey = null)
+    {
         $this->setLogger(new NullLogger());
+        $this->apiKey = $apiKey;
     }
-    
+
     /**
      * Is this environment have cURL installed and the module enabled in PHP?
-     * 
+     *
      * @return boolean
      */
-    public function isSupported() {
+    public function isSupported()
+    {
         return function_exists('curl_init');
     }
 
     /**
      * Build a cURL resource with basic configurations already made
-     * 
+     *
      * @return resource cURL handle
+     * @throws UnsupportedException
      */
-    private function _createCurlHandle() {
+    private function _createCurlHandle()
+    {
 
         // Make sure the cURL extension is enabled
         if (!$this->isSupported()) {
@@ -45,7 +55,7 @@ class Curl implements Adapter
         $curl = curl_init();
         // If cURL is still not initialized, then there is a problem
         if (!$curl) {
-            $this->logger->error("cURL was unable to initalized successfully.");
+            $this->logger->error("cURL was unable to initialized successfully.");
             throw new RuntimeException('Unable to create handle for cURL.');
         }
         $this->logger->info("cURL initialised successfully.");
@@ -72,11 +82,13 @@ class Curl implements Adapter
 
     /**
      * Perform a GET request using a cURL handle
-     * 
-     * @param  string $url What URL are we requesting from the API?
+     *
+     * @param string $url What URL are we requesting from the API?
+     *
      * @return string      Returns the body of the response
      */
-    public function get($url) {
+    public function get($url)
+    {
 
         $curl = $this->_createCurlHandle();
 
@@ -85,11 +97,20 @@ class Curl implements Adapter
         curl_setopt($curl, CURLOPT_HEADER, true);
         curl_setopt($curl, CURLOPT_POST, 0);
         curl_setopt($curl, CURLOPT_URL, $url);
+        if ($this->apiKey) {
+            curl_setopt(
+                $curl,
+                CURLOPT_HTTPHEADER,
+                [
+                    'hibp-api-key: ' . $this->apiKey,
+                ]
+            );
+        }
 
         // Perform our request and check the response
         $response = curl_exec($curl);
         $code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-        $this->logger->info("Request returned a $code response.");
+        $this->logger->info("Request $url returned a $code response.");
         $header_size = curl_getinfo($curl, CURLINFO_HEADER_SIZE);
         curl_close($curl);
 
@@ -121,7 +142,9 @@ class Curl implements Adapter
             case 404:
                 throw new RuntimeException("Unknown endpoint specified. Check the URL you specified for errors.");
             case 429:
-                throw new RateLimitExceededException("Ratelimit reached. Please try again in {$headers['Retry-After']} seconds.");
+                throw new RateLimitExceededException(
+                    "Ratelimit reached. Please try again in {$headers['Retry-After']} seconds."
+                );
             case 503:
                 throw new RuntimeException("Service unavailable. It is possible that your client has been throttled.");
         }
